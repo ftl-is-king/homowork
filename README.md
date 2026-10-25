@@ -92,6 +92,25 @@ int main() {
 
 ---
 
+## 📁 仓库文件结构
+
+```text
+├── .github/
+│   ├── ISSUE_TEMPLATE/
+│   │   └── submit_homework.md       # Issue URL 提交规范表单模板
+│   └── workflows/
+│       └── eval_url.yml             # 核心：自动审批与拉取私有库评测工作流
+├── config.py                        # 评测用例配置（测试点输入、标准输出、截止日期）
+├── test.py                          # 自动化编译、耗时监控与打分引擎
+├── requirements.txt                 # Python 依赖
+├── student_template/                # 学生作业代码参考模板
+│   ├── 1_main.c                     # 第 1 题标准代码规范示例
+│   └── README.md                    # 学生端说明
+└── README.md                        # 本项目说明文档
+```
+
+---
+
 ## 🔒 隐私与敏感信息保护机制（公私仓库分离）
 
 为了严格保护全班学生的个人隐私与成绩安全，系统采用**公私双仓库分离架构**：
