@@ -244,6 +244,11 @@ class Student:
             print(f"⚠️ 提交已超过截止时间 ({config.DEADLINE})，本次成绩不计入成绩表。")
             return False
 
+        # 确保 CSV 保存目录存在
+        csv_dir = os.path.dirname(os.path.abspath(self.csv_path))
+        if csv_dir:
+            os.makedirs(csv_dir, exist_ok=True)
+
         # 维护 CSV 文件
         if os.path.exists(self.csv_path):
             try:
@@ -286,6 +291,15 @@ class Student:
             print("✅ 成绩添加成功（首次记录）")
 
         df.to_csv(self.csv_path, index=False, encoding="utf-8-sig")
+
+        # 同时同步一份到根目录 test.csv（保证双向兼容）
+        root_csv = os.path.join(SCRIPT_DIR, "test.csv")
+        if os.path.abspath(self.csv_path) != os.path.abspath(root_csv):
+            try:
+                df.to_csv(root_csv, index=False, encoding="utf-8-sig")
+            except Exception:
+                pass
+
         return True
 
     def push_to_github(self, repo_url: str = config.DEFAULT_REPO_URL):
