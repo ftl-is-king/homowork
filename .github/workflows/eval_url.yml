@@ -30,14 +30,6 @@ jobs:
     steps:
       - name: 检出公开学生端仓库
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: 配置 Python 环境
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
 
       - name: 解析提交信息与仓库 URL
         id: parse_submission
@@ -83,31 +75,17 @@ jobs:
         run: |
           gh issue comment "$ISSUE_NUMBER" --body "❌ **评测未启动**：未能从您的 Issue 中解析到有效的 GitHub 仓库地址，请检查并按照模板提供如 \`https://github.com/username/repo\` 的链接。"
 
-      - name: 克隆学生作业代码
-        if: steps.parse_submission.outputs.valid == 'true'
-        run: |
-          STUDENT_URL="${{ steps.parse_submission.outputs.repo_url }}"
-          rm -rf ./student_code
-          echo "正在克隆学生仓库: ${STUDENT_URL}..."
-          git clone --depth 1 "${STUDENT_URL}" ./student_code
-
-      - name: 安全拉取私有后台评测系统 (homowork-scores)
+      - name: 极速克隆学生代码与私有后台
         if: steps.parse_submission.outputs.valid == 'true'
         env:
           SCORES_TOKEN: ${{ secrets.SCORES_TOKEN }}
         run: |
-          rm -rf ./backend
-          if [ -z "${SCORES_TOKEN}" ]; then
-            echo "❌ 未检测到 SCORES_TOKEN Secret，无法访问私有后台系统！"
-            exit 1
-          fi
-          echo "正在拉取私有后台评测引擎与数据库..."
+          STUDENT_URL="${{ steps.parse_submission.outputs.repo_url }}"
+          rm -rf ./student_code ./backend
+          git clone --depth 1 "${STUDENT_URL}" ./student_code
           git clone --depth 1 "https://${SCORES_TOKEN}@github.com/ftl-is-king/homowork-scores.git" ./backend
-          sudo apt-get update
-          sudo apt-get install -y gcc time
-          pip install -r ./backend/requirements.txt
 
-      - name: 执行后台自动化评测
+      - name: 执行后台秒级评测
         if: steps.parse_submission.outputs.valid == 'true'
         id: run_test
         run: |
@@ -118,14 +96,14 @@ jobs:
             --no-push \
             --json-output results.json
 
-      - name: 生成评测报告并回帖
+      - name: 生成评测报告、回帖并自动修正 Issue 标题
         if: steps.parse_submission.outputs.valid == 'true' && (github.event_name == 'issues' || github.event.inputs.issue_number != '')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.inputs.issue_number }}
         run: |
           python3 -c "
-          import json, os
+          import json, os, subprocess
 
           issue_num = os.environ.get('ISSUE_NUMBER')
           if not os.path.exists('results.json'):
@@ -139,8 +117,13 @@ jobs:
               else:
                   lines = ['### 📋 作业自动化评测报告\n']
                   first = results[0]
-                  if first.get('student_id'):
-                      lines.append(f'**学号**: {first[\"student_id\"]} | **姓名**: {first[\"name\"]}\n')
+                  stu_id = first.get('student_id')
+                  stu_name = first.get('name')
+                  if stu_id and stu_name:
+                      lines.append(f'**学号**: {stu_id} | **姓名**: {stu_name}\n')
+                      # 自动修改 Issue 标题为 [作业评测] 学号 - 姓名
+                      new_title = f'[作业评测] {stu_id} - {stu_name}'
+                      subprocess.run(['gh', 'issue', 'edit', str(issue_num), '--title', new_title], check=False)
 
                   lines.append('| 题号 | 文件名 | 测试点 | 运行时间 (ms) | 运行内存 (KB) | 最终得分 | 状态 |')
                   lines.append('|:---:|:---|:---:|:---:|:---:|:---:|:---:|')
@@ -178,7 +161,7 @@ jobs:
           "
           gh issue comment "$ISSUE_NUMBER" --body-file comment_body.md
 
-      - name: 将最新成绩安全推送到私有后台 (homowork-scores)
+      - name: 将最新成绩推送到私有后台 (homowork-scores)
         if: steps.parse_submission.outputs.valid == 'true'
         env:
           SCORES_TOKEN: ${{ secrets.SCORES_TOKEN }}
@@ -195,7 +178,7 @@ jobs:
                 echo "🔒 成绩已安全加密推送到私有仓库 homowork-scores！"
                 break
               fi
-              sleep 2
+              sleep 1
             done
           else
             echo "ℹ️ 私有成绩表 test.csv 无变动或未达到更高分数，跳过提交。"
