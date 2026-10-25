@@ -3,6 +3,8 @@ name: 作业 URL 自动审批与评测
 on:
   issues:
     types: [opened, edited]
+  issue_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       repo_url:
@@ -20,23 +22,25 @@ permissions:
 
 jobs:
   evaluate-submission:
+    # 过滤掉机器人自己的发帖，防止死循环
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      contains(github.event.issue.labels.*.name, 'homework-submission') ||
-      contains(github.event.issue.title, '作业') ||
-      contains(github.event.issue.title, 'homework')
+      (github.actor != 'github-actions[bot]' && github.event.sender.type != 'Bot') &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        contains(github.event.issue.labels.*.name, 'homework-submission') ||
+        contains(github.event.issue.title, '作业') ||
+        contains(github.event.issue.title, 'homework')
+      )
     runs-on: ubuntu-22.04
 
     steps:
-      - name: 检出公开学生端仓库
-        uses: actions/checkout@v4
-
       - name: 解析提交信息与仓库 URL
         id: parse_submission
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_REPO_URL: ${{ github.event.inputs.repo_url }}
           ISSUE_BODY: ${{ github.event.issue.body }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
           python3 -c "
           import os, re, sys
@@ -45,12 +49,13 @@ jobs:
           if event_name == 'workflow_dispatch':
               url = os.environ.get('INPUT_REPO_URL', '').strip()
           else:
-              body = os.environ.get('ISSUE_BODY', '')
-              match = re.search(r'https://github\.com/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+', body)
-              if match:
-                  url = match.group(0).rstrip('.')
-              else:
-                  url = ''
+              comment_body = os.environ.get('COMMENT_BODY', '')
+              issue_body = os.environ.get('ISSUE_BODY', '')
+              # 优先从评论中匹配，若评论没有则使用 Issue 正文中的链接
+              match = re.search(r'https://github\.com/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+', comment_body)
+              if not match:
+                  match = re.search(r'https://github\.com/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+', issue_body)
+              url = match.group(0).rstrip('.') if match else ''
 
           if not url:
               print('❌ 未在提交内容中找到有效的 GitHub 仓库 URL')
@@ -61,29 +66,32 @@ jobs:
           if url.endswith('.git'):
               url = url[:-4]
 
-          print(f'✅ 解析到作业仓库 URL: {url}')
+          print(f'⚡ 解析到作业仓库 URL: {url}')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write('valid=true\n')
               f.write(f'repo_url={url}\n')
           "
 
       - name: 校验失败通知
-        if: steps.parse_submission.outputs.valid == 'false' && github.event_name == 'issues'
+        if: steps.parse_submission.outputs.valid == 'false' && (github.event_name == 'issues' || github.event_name == 'issue_comment')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
-          gh issue comment "$ISSUE_NUMBER" --body "❌ **评测未启动**：未能从您的 Issue 中解析到有效的 GitHub 仓库地址，请检查并按照模板提供如 \`https://github.com/username/repo\` 的链接。"
+          gh issue comment "$ISSUE_NUMBER" --body "❌ **评测未启动**：未能从您的提交内容中解析到有效的 GitHub 仓库地址，请检查并提供如 \`https://github.com/username/repo\` 的链接。"
 
-      - name: 极速克隆学生代码与私有后台
+      - name: 并行浅克隆学生代码与私有后台 (极速并发)
         if: steps.parse_submission.outputs.valid == 'true'
         env:
           SCORES_TOKEN: ${{ secrets.SCORES_TOKEN }}
         run: |
           STUDENT_URL="${{ steps.parse_submission.outputs.repo_url }}"
           rm -rf ./student_code ./backend
-          git clone --depth 1 "${STUDENT_URL}" ./student_code
-          git clone --depth 1 "https://${SCORES_TOKEN}@github.com/ftl-is-king/homowork-scores.git" ./backend
+          # 并行后台浅克隆，网络延迟减半
+          git clone --depth 1 --single-branch "${STUDENT_URL}" ./student_code &
+          git clone --depth 1 --single-branch "https://${SCORES_TOKEN}@github.com/ftl-is-king/homowork-scores.git" ./backend &
+          wait
+          echo "⚡ 代码与后台引擎并行拉取完成"
 
       - name: 执行后台秒级评测
         if: steps.parse_submission.outputs.valid == 'true'
@@ -97,7 +105,7 @@ jobs:
             --json-output results.json
 
       - name: 生成评测报告、回帖并自动修正 Issue 标题
-        if: steps.parse_submission.outputs.valid == 'true' && (github.event_name == 'issues' || github.event.inputs.issue_number != '')
+        if: steps.parse_submission.outputs.valid == 'true' && (github.event_name == 'issues' || github.event_name == 'issue_comment' || github.event.inputs.issue_number != '')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.inputs.issue_number }}
@@ -152,7 +160,7 @@ jobs:
                   if all_passed:
                       lines.append('> 🎉 **恭喜！提交的代码通过了所有评测标准，成绩已安全登记入库！**')
                   else:
-                      lines.append('> 💡 **提示**：可根据上方结果修改代码后重新提交或编辑 Issue 重新触发。')
+                      lines.append('> 💡 **提示**：可直接在下方回复任何消息，或编辑原 Issue，系统将在几秒内重新拉取最新代码重测。')
 
                   body = '\n'.join(lines)
 
@@ -180,6 +188,4 @@ jobs:
               fi
               sleep 1
             done
-          else
-            echo "ℹ️ 私有成绩表 test.csv 无变动或未达到更高分数，跳过提交。"
           fi
