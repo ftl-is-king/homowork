@@ -1,0 +1,184 @@
+name: 作业 URL 自动审批与评测
+
+on:
+  issues:
+    types: [opened, edited]
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: '学生代码仓库 URL'
+        required: true
+        type: string
+      issue_number:
+        description: '关联的 Issue 编号 (可选，用于回帖)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  evaluate-submission:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.issue.labels.*.name, 'homework-submission') ||
+      contains(github.event.issue.title, '作业') ||
+      contains(github.event.issue.title, 'homework')
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: 检出评测仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 配置 Python 与系统依赖
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 安装评测依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc time
+          pip install -r requirements.txt
+
+      - name: 解析提交信息与仓库 URL
+        id: parse_submission
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_REPO_URL: ${{ github.event.inputs.repo_url }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          python3 -c "
+          import os, re, sys
+
+          event_name = os.environ.get('EVENT_NAME', '')
+          if event_name == 'workflow_dispatch':
+              url = os.environ.get('INPUT_REPO_URL', '').strip()
+          else:
+              body = os.environ.get('ISSUE_BODY', '')
+              match = re.search(r'https://github\.com/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+', body)
+              if match:
+                  url = match.group(0).rstrip('.')
+              else:
+                  url = ''
+
+          if not url:
+              print('❌ 未在提交内容中找到有效的 GitHub 仓库 URL')
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write('valid=false\n')
+              sys.exit(0)
+
+          if url.endswith('.git'):
+              url = url[:-4]
+
+          print(f'✅ 解析到作业仓库 URL: {url}')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('valid=true\n')
+              f.write(f'repo_url={url}\n')
+          "
+
+      - name: 校验失败通知
+        if: steps.parse_submission.outputs.valid == 'false' && github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --body "❌ **评测未启动**：未能从您的 Issue 中解析到有效的 GitHub 仓库地址，请检查并按照模板提供如 \`https://github.com/username/repo\` 的链接。"
+
+      - name: 克隆学生代码
+        if: steps.parse_submission.outputs.valid == 'true'
+        run: |
+          STUDENT_URL="${{ steps.parse_submission.outputs.repo_url }}"
+          rm -rf ./student_code
+          echo "正在克隆学生仓库: ${STUDENT_URL}..."
+          git clone --depth 1 "${STUDENT_URL}" ./student_code
+
+      - name: 执行自动化评测
+        if: steps.parse_submission.outputs.valid == 'true'
+        id: run_test
+        run: |
+          python3 test.py --dir ./student_code --no-push --json-output results.json
+
+      - name: 生成评测报告并回帖
+        if: steps.parse_submission.outputs.valid == 'true' && (github.event_name == 'issues' || github.event.inputs.issue_number != '')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || github.event.inputs.issue_number }}
+        run: |
+          python3 -c "
+          import json, os, subprocess
+
+          issue_num = os.environ.get('ISSUE_NUMBER')
+          if not os.path.exists('results.json'):
+              body = '### ❌ 评测执行失败\n未能生成有效评测结果，请检查代码目录结构或编译错误。'
+          else:
+              with open('results.json', 'r', encoding='utf-8') as f:
+                  results = json.load(f)
+
+              if not results:
+                  body = '### ⚠️ 未找到有效作业代码\n请确保作业文件命名为 \`1_main.c\`、\`2_xxx.c\` 等规范格式。'
+              else:
+                  lines = ['### 📋 作业自动化评测报告\n']
+                  first = results[0]
+                  if first.get('student_id'):
+                      lines.append(f'**学号**: {first[\"student_id\"]} | **姓名**: {first[\"name\"]}\n')
+
+                  lines.append('| 题号 | 文件名 | 测试点 | 运行时间 (ms) | 运行内存 (KB) | 最终得分 | 状态 |')
+                  lines.append('|:---:|:---|:---:|:---:|:---:|:---:|:---:|')
+
+                  all_passed = True
+                  total_score = 0
+                  for r in results:
+                      prob = r.get('problem', '-')
+                      fname = r.get('file', '-')
+                      if r.get('success'):
+                          right = r.get('right', '-')
+                          t = r.get('time_ms', 0)
+                          m = r.get('memory_kb', 0)
+                          sc = r.get('score', 0)
+                          total_score += sc
+                          status = '✅ 通过' if sc >= 60 else '⚠️ 部分通过'
+                          if sc < 60:
+                              all_passed = False
+                          lines.append(f'| 第 {prob} 题 | \`{fname}\` | {right} | {t} | {m} | **{sc}** | {status} |')
+                      else:
+                          all_passed = False
+                          err = r.get('error', '失败')
+                          lines.append(f'| 第 {prob} 题 | \`{fname}\` | - | - | - | **0** | ❌ {err} |')
+
+                  lines.append('\n---\n')
+                  if all_passed:
+                      lines.append('> 🎉 **恭喜！提交的代码通过了所有评测标准，成绩已登记！**')
+                  else:
+                      lines.append('> 💡 **提示**：可根据上方结果修改代码后重新提交或编辑 Issue 重新触发。')
+
+                  body = '\n'.join(lines)
+
+          with open('comment_body.md', 'w', encoding='utf-8') as f:
+              f.write(body)
+          "
+          gh issue comment "$ISSUE_NUMBER" --body-file comment_body.md
+
+      - name: 提交并推送成绩汇总表 (test.csv)
+        if: steps.parse_submission.outputs.valid == 'true'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          if [[ -n $(git status -s test.csv) ]]; then
+            git add test.csv
+            git commit -m "chore: 自动同步作业评测成绩 [skip ci]"
+            for i in {1..3}; do
+              git pull --rebase origin main
+              if git push origin main; then
+                echo "✅ 成绩成功推送到主分支！"
+                break
+              fi
+              sleep 2
+            done
+          else
+            echo "ℹ️ test.csv 无变动或未达到更高分数，跳过提交。"
+          fi
