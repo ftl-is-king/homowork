@@ -9,8 +9,8 @@
 - 第 3 题：`3_main.c` 或 `3_xxx.c`
 - 其余题目以此类推...
 
-## 代码头部注释规范（必须严格遵守）
-每个 `.c` 文件的**前三行**必须按如下格式书写注释（以 `//` 开头），否则评测系统将无法识别身份并拒绝打分：
+## 代码头部注释规范（系统据此识别学号姓名）
+每个 `.c` 文件的**前三行**必须按如下格式书写注释（以 `//` 开头）：
 
 ```c
 // 202401010001
@@ -19,6 +19,8 @@
 ```
 
 ## 提交作业方式
-你可以选择以下两种方式之一提交作业：
-1. **方式一（最简单：URL 提交）**：在 [ftl-is-king/homowork/issues](https://github.com/ftl-is-king/homowork/issues) 点击新建 Issue，粘贴你本仓库的 URL，机器人将自动评测并回帖。
-2. **方式二（自动同步）**：根据 [use.md](use.md) 在仓库设置中配置 `MY_URL` Secret，直接在网页或本地 commit push 代码，GitHub Actions 将自动运行并同步成绩。
+在 [ftl-is-king/homowork/issues](https://github.com/ftl-is-king/homowork/issues) 点击 **New Issue**：
+- **标题（Title）**：填写 `[作业提交] 学号 - 姓名`
+- **正文（Body）**：直接粘贴你本代码仓库的 GitHub 网址（例如 `https://github.com/your-username/my-c-hw`）
+
+提交后，机器人将在 1~2 分钟内自动评测并在此 Issue 下回复成绩报告。

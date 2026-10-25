@@ -17,6 +17,7 @@ results.json
 comment_body.md
 student_code/
 test_system/
+push_workflows.ps1
 
 # IDE 与操作系统
 .vscode/

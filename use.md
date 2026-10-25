@@ -1,48 +1,57 @@
-# 作业评测系统使用指南 (use.md)
+# 作业提交使用指南 (use.md)
 
-欢迎使用 C 语言作业自动化评测系统！
-
----
-
-## 提交方式一：通过 GitHub 仓库 URL 提交（推荐）
-
-该方式无需配置任何 Secret，只需提供包含作业代码的公开 GitHub 仓库 URL 即可。
-
-### 步骤说明：
-1. **准备代码**：
-   - 建立你的 GitHub 代码仓库（如 `c-homework`）。
-   - 将作业代码文件命名为 `1_main.c`、`2_main.c` 等（以题目序号开头）。
-   - 代码前三行格式必须为：
-     ```c
-     // 学号 (例如: 202401010001)
-     // 邮箱 (例如: student@example.com)
-     // 姓名 (例如: 张三)
-     ```
-2. **在评测仓库提交 Issue**：
-   - 进入 [ftl-is-king/homowork/issues](https://github.com/ftl-is-king/homowork/issues)。
-   - 点击 **New Issue**，选择 **作业 URL 提交与自动评测**。
-   - 填入学号、姓名以及你的仓库地址（例如 `https://github.com/ftl-is-king/my-homework`）。
-   - 点击提交。
-3. **等待系统自动审批**：
-   - GitHub Actions 会在后台自动克隆并运行测试。
-   - 评测完成后会在 Issue 下方自动回复详细的成绩单（包含各用例耗时、内存、得分与总分）。
-   - 成绩自动合并并计入主仓库的 `test.csv`。
+本指南介绍如何通过 **GitHub 仓库 URL 方式** 提交 C 语言作业并获得自动化评测成绩。
 
 ---
 
-## 提交方式二：使用学生模板与 GitHub Actions 自动回传
+## 提交步骤
 
-若你使用了 `student_template` 目录构建模板仓库，可以通过设置 `MY_URL` 实现推送即自动评测并同步成绩。
+### 步骤一：创建你的作业仓库
+1. 在你的个人 GitHub 账号中新建一个**公开（Public）**仓库（如 `c-homework`）。
+2. 在仓库中编写作业代码，文件按题目序号命名：
+   - 第 1 题：`1_main.c` 或 `1_xxx.c`
+   - 第 2 题：`2_main.c` 或 `2_xxx.c`
+   - 后续题目以此类推...
+3. **重要：代码前三行必须包含学号、邮箱与姓名注释**：
+   ```c
+   // 202401010001
+   // student@example.com
+   // 张三
 
-### 步骤说明：
-1. **基于模板创建仓库**：
-   - 使用包含 `student_template` 结构的仓库。
-2. **配置 Secret**：
-   - 在个人作业仓库中点击 **Settings** -> **Secrets and variables** -> **Actions**。
-   - 点击 **New repository secret**。
-   - Secret 名称设置为：`MY_URL`。
-   - Secret 内容设置为群文件中分发的访问凭据。
-3. **提交代码**：
-   - 修改 `1_main.c` 并提交（Commit & Push）。
-   - 触发个人仓库的 GitHub Actions。
-   - Action 会拉取评测脚本执行测试，并将最新成绩回传推送到主仓库 `test.csv`。
+   #include <stdio.h>
+   int main() {
+       // 你的逻辑
+       return 0;
+   }
+   ```
+
+---
+
+### 步骤二：在评测仓库提交 Issue
+1. 访问作业审批仓库：[ftl-is-king/homowork/issues](https://github.com/ftl-is-king/homowork/issues)。
+2. 点击绿色的 **New Issue** 按钮。
+3. 选择 **作业 URL 提交与自动评测** 模板，点击 **Get started**。
+4. 按要求规范填写表单：
+   - **Title（标题）**：`[作业提交] 学号 - 姓名`（例如 `[作业提交] 202401010001 - 张三`）
+   - **学号**：填写你的完整学号（如 `202401010001`）
+   - **姓名**：填写你的真实姓名（如 `张三`）
+   - **作业仓库 URL**：填写公开的 GitHub 仓库完整链接（如 `https://github.com/zhangsan/c-homework`）
+   - **提交确认**：勾选两个复选框，确认代码规范
+5. 点击 **Submit new issue** 提交。
+
+---
+
+### 步骤三：查看评测报告与成绩
+1. 提交后约 1~2 分钟，GitHub Actions 机器人会自动在你的 Issue 下方回复评测结果。
+2. 评测报告包含：
+   - 每个测试点的通过状态（✅ 通过 / ❌ 错误）
+   - 代码运行平均耗时 (ms) 与内存占用 (KB)
+   - 正确率得分、性能得分与总得分
+3. 评测成绩将自动记录并归档到主仓库成绩表 `test.csv` 中。
+
+---
+
+### 步骤四：代码修改与重测（支持多次迭代）
+- 若测试未全部通过，可直接在你的作业仓库中修改代码并重新 push。
+- 修改后，重新编辑 Issue 或提交新 Issue，机器人将拉取最新代码重测。
+- 系统自动保留你的单题最高成绩，无惧多次尝试。
