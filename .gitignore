@@ -1,0 +1,25 @@
+# 编译产物
+*.out
+*.exe
+*.o
+*.obj
+*.so
+*.dylib
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# 评测临时运行产物
+results.json
+comment_body.md
+student_code/
+test_system/
+
+# IDE 与操作系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,43 @@
+name: 作业 URL 提交与自动评测
+description: 提交你的 C 语言作业仓库 URL，系统将自动进行编译、测试、评分并反馈
+title: "[作业提交] "
+labels: ["homework-submission"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### 欢迎提交 C 语言作业
+        提交后 GitHub Actions 将自动克隆你的代码进行评测，并在此 Issue 下方自动回复成绩报告。
+  - type: input
+    id: student_id
+    attributes:
+      label: 学号
+      description: 请填写你的学号（需与代码第1行注释及白名单一致）
+      placeholder: 例如: 202401010001
+    validations:
+      required: true
+  - type: input
+    id: student_name
+    attributes:
+      label: 姓名
+      description: 请填写你的真实姓名（需与代码第3行注释及白名单一致）
+      placeholder: 例如: 张三
+    validations:
+      required: true
+  - type: input
+    id: repo_url
+    attributes:
+      label: 作业仓库 URL
+      description: 请提供你存放作业代码的公开 GitHub 仓库地址
+      placeholder: 例如: https://github.com/your-username/my-c-homework
+    validations:
+      required: true
+  - type: checkboxes
+    id: check_rules
+    attributes:
+      label: 提交确认
+      options:
+        - label: 我已确认代码文件命名规范（如 1_main.c、2_xxx.c 等）
+          required: true
+        - label: 我已在代码前三行规范添加学号、邮箱和姓名注释
+          required: true
