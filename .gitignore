@@ -17,7 +17,12 @@ results.json
 comment_body.md
 student_code/
 test_system/
+private_data/
 push_workflows.ps1
+
+# 隐私敏感数据 (转移至私有仓库 homowork-scores 存储)
+DB.csv
+test.csv
 
 # IDE 与操作系统
 .vscode/

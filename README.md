@@ -92,10 +92,24 @@ int main() {
 
 ---
 
+## 🔒 隐私与敏感信息保护机制（公私仓库分离）
+
+为了严格保护全班学生的个人隐私与成绩安全，系统采用**公私双仓库分离架构**：
+1. **公开评测仓库 (`homowork`)**：
+   - 本仓库保持公开，供学生提交 Issue 触发评测。
+   - 仓库内**不存放任何真实学生名单和全班成绩**。
+2. **私有成绩仓库 (`homowork-scores`)**：
+   - 独立私有仓库（仅教师可见）：[https://github.com/ftl-is-king/homowork-scores](https://github.com/ftl-is-king/homowork-scores)
+   - 专门存放真实学生白名单 `DB.csv` 与全班汇总成绩单 `test.csv`。
+   - 评测机器人每次运行后，自动将成绩推送到私有仓库中存档。
+   - **学生端隐私保护**：学生仅在自己的 Issue 评论区看到本人代码的测试反馈，外部任何访客均无法查阅全班成绩。
+
+---
+
 ## 🚀 教师与维护者指南
 
-### 1. 录入学生白名单 (`DB.csv`)
-在 `DB.csv` 中登记具备提交资格的学生学号、姓名与邮箱：
+### 1. 管理真实学生名单 (`DB.csv`)
+请在私有仓库 **[homowork-scores](https://github.com/ftl-is-king/homowork-scores)** 中的 `DB.csv` 登记学生信息：
 ```csv
 id,name,email
 202401010001,测试学生,test@example.com
@@ -108,5 +122,5 @@ id,name,email
 - `ANSWER`: 每道题的预期输出列表。
 - `DEADLINE`: 截止提交时间。
 
-### 3. 查看与导出成绩
-所有合规的最高成绩均实时汇总在 `test.csv` 中，可直接在 GitHub 网页查看或下载分析。
+### 3. 查看全班汇总成绩
+教师只需进入私有仓库 **[homowork-scores](https://github.com/ftl-is-king/homowork-scores)**，即可随时查看或下载全班最新的 `test.csv` 成绩表。
