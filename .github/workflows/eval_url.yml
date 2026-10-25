@@ -19,6 +19,7 @@ on:
 permissions:
   contents: write
   issues: write
+  pull-requests: write
 
 jobs:
   evaluate-submission:
@@ -37,7 +38,7 @@ jobs:
       - name: 1. 解析作业 URL 并标记已接单
         id: parse
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SCORES_TOKEN }}
           GH_REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
           INPUT_REPO_URL: ${{ github.event.inputs.repo_url }}
@@ -81,7 +82,7 @@ jobs:
       - name: 校验失败通知
         if: steps.parse.outputs.valid == 'false' && (github.event_name == 'issues' || github.event_name == 'issue_comment')
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SCORES_TOKEN }}
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
@@ -115,7 +116,7 @@ jobs:
       - name: 4. 生成报告、发送 Issue 成绩回帖并更名
         if: steps.parse.outputs.valid == 'true' && (github.event_name == 'issues' || github.event_name == 'issue_comment' || github.event.inputs.issue_number != '')
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SCORES_TOKEN }}
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.inputs.issue_number }}
           RUN_ID: ${{ github.run_id }}
@@ -186,6 +187,8 @@ jobs:
 
       - name: 5. 成绩加密归档至私有数据库 (homowork-scores)
         if: steps.parse.outputs.valid == 'true'
+        env:
+          SCORES_TOKEN: ${{ secrets.SCORES_TOKEN }}
         run: |
           cd backend
           git config user.name "github-actions[bot]"
