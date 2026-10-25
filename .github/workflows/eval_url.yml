@@ -179,6 +179,7 @@ jobs:
                   for r in results:
                       prob = r.get('problem', '-')
                       fname = r.get('file', '-')
+                      t_str = r.get('submit_time') or submit_time
                       if r.get('success'):
                           right = r.get('right', '-')
                           t = r.get('time_ms', 0)
@@ -187,11 +188,11 @@ jobs:
                           status = '✅ 通过' if sc >= 60 else '⚠️ 部分通过'
                           if sc < 60:
                               all_passed = False
-                          lines.append(f'| 第 {prob} 题 | `{fname}` | {right} | {t} | {m} | **{sc}** | {status} | {submit_time} |')
+                          lines.append(f'| 第 {prob} 题 | `{fname}` | {right} | {t} | {m} | **{sc}** | {status} | {t_str} |')
                       else:
                           all_passed = False
                           err = r.get('error', '失败')
-                          lines.append(f'| 第 {prob} 题 | `{fname}` | - | - | - | **0** | ❌ {err} | {submit_time} |')
+                          lines.append(f'| 第 {prob} 题 | `{fname}` | - | - | - | **0** | ❌ {err} | {t_str} |')
 
                   lines.append('\n---\n')
                   if all_passed:
