@@ -51,7 +51,6 @@ jobs:
           else:
               comment_body = os.environ.get('COMMENT_BODY', '')
               issue_body = os.environ.get('ISSUE_BODY', '')
-              # 优先从评论中匹配，若评论没有则使用 Issue 正文中的链接
               match = re.search(r'https://github\.com/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+', comment_body)
               if not match:
                   match = re.search(r'https://github\.com/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+', issue_body)
@@ -76,9 +75,10 @@ jobs:
         if: steps.parse_submission.outputs.valid == 'false' && (github.event_name == 'issues' || github.event_name == 'issue_comment')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
-          gh issue comment "$ISSUE_NUMBER" --body "❌ **评测未启动**：未能从您的提交内容中解析到有效的 GitHub 仓库地址，请检查并提供如 \`https://github.com/username/repo\` 的链接。"
+          gh issue comment "$ISSUE_NUMBER" --repo "$GH_REPO" --body "❌ **评测未启动**：未能从您的提交内容中解析到有效的 GitHub 仓库地址，请检查并提供如 \`https://github.com/username/repo\` 的链接。"
 
       - name: 并行浅克隆学生代码与私有后台 (极速并发)
         if: steps.parse_submission.outputs.valid == 'true'
@@ -87,7 +87,6 @@ jobs:
         run: |
           STUDENT_URL="${{ steps.parse_submission.outputs.repo_url }}"
           rm -rf ./student_code ./backend
-          # 并行后台浅克隆，网络延迟减半
           git clone --depth 1 --single-branch "${STUDENT_URL}" ./student_code &
           git clone --depth 1 --single-branch "https://${SCORES_TOKEN}@github.com/ftl-is-king/homowork-scores.git" ./backend &
           wait
@@ -108,12 +107,14 @@ jobs:
         if: steps.parse_submission.outputs.valid == 'true' && (github.event_name == 'issues' || github.event_name == 'issue_comment' || github.event.inputs.issue_number != '')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.inputs.issue_number }}
         run: |
           python3 -c "
           import json, os, subprocess
 
           issue_num = os.environ.get('ISSUE_NUMBER')
+          repo_name = os.environ.get('GH_REPO')
           if not os.path.exists('results.json'):
               body = '### ❌ 评测执行失败\n未能生成有效评测结果，请检查代码目录结构或编译错误。'
           else:
@@ -131,7 +132,7 @@ jobs:
                       lines.append(f'**学号**: {stu_id} | **姓名**: {stu_name}\n')
                       # 自动修改 Issue 标题为 [作业评测] 学号 - 姓名
                       new_title = f'[作业评测] {stu_id} - {stu_name}'
-                      subprocess.run(['gh', 'issue', 'edit', str(issue_num), '--title', new_title], check=False)
+                      subprocess.run(['gh', 'issue', 'edit', str(issue_num), '--repo', repo_name, '--title', new_title], check=False)
 
                   lines.append('| 题号 | 文件名 | 测试点 | 运行时间 (ms) | 运行内存 (KB) | 最终得分 | 状态 |')
                   lines.append('|:---:|:---|:---:|:---:|:---:|:---:|:---:|')
@@ -167,7 +168,7 @@ jobs:
           with open('comment_body.md', 'w', encoding='utf-8') as f:
               f.write(body)
           "
-          gh issue comment "$ISSUE_NUMBER" --body-file comment_body.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$GH_REPO" --body-file comment_body.md
 
       - name: 将最新成绩推送到私有后台 (homowork-scores)
         if: steps.parse_submission.outputs.valid == 'true'
