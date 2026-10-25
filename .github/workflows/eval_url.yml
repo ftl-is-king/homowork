@@ -34,187 +34,188 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 秒级极速并发评测与直连回帖
+      - name: 1. 解析作业 URL 并标记已接单
+        id: parse
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          SCORES_TOKEN: ${{ secrets.SCORES_TOKEN }}
           EVENT_NAME: ${{ github.event_name }}
           INPUT_REPO_URL: ${{ github.event.inputs.repo_url }}
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.inputs.issue_number }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           COMMENT_BODY: ${{ github.event.comment.body }}
-          RUN_ID: ${{ github.run_id }}
         run: |
-          python3 - << 'EOF'
-          import os, sys, re, json, urllib.request, subprocess, shutil
+          python3 -c "
+          import os, sys, re, json, urllib.request
 
           gh_token = os.environ.get('GH_TOKEN', '')
           gh_repo = os.environ.get('GH_REPO', '')
-          scores_token = os.environ.get('SCORES_TOKEN', '')
           event_name = os.environ.get('EVENT_NAME', '')
           issue_num = os.environ.get('ISSUE_NUMBER', '')
           input_url = os.environ.get('INPUT_REPO_URL', '').strip()
           comment_body = os.environ.get('COMMENT_BODY', '')
           issue_body = os.environ.get('ISSUE_BODY', '')
-          run_id = os.environ.get('RUN_ID', '')
 
-          api_headers = {
-              'User-Agent': 'Actions-Auto-Eval',
-              'Authorization': f'token {gh_token}',
-              'Accept': 'application/vnd.github.v3+json'
-          }
-
-          # 0. 瞬间为 Issue 点亮“已接单”眼睛图标（即时视觉确认）
-          try:
-              react_url = f'https://api.github.com/repos/{gh_repo}/issues/{issue_num}/reactions'
-              react_data = json.dumps({'content': 'eyes'}).encode('utf-8')
-              req = urllib.request.Request(react_url, data=react_data, headers=api_headers)
-              urllib.request.urlopen(req, timeout=5)
-          except Exception:
-              pass
-
-          def post_comment(text):
-              if not issue_num or not gh_repo or not gh_token:
-                  return
+          # 立即为 Issue 点亮已接单图标
+          if issue_num and gh_repo and gh_token:
               try:
-                  url = f'https://api.github.com/repos/{gh_repo}/issues/{issue_num}/comments'
-                  data = json.dumps({'body': text}).encode('utf-8')
-                  req = urllib.request.Request(url, data=data, headers=api_headers)
-                  urllib.request.urlopen(req, timeout=10)
-              except Exception as e:
-                  print('Post comment error:', e)
+                  url = f'https://api.github.com/repos/{gh_repo}/issues/{issue_num}/reactions'
+                  data = json.dumps({'content': 'eyes'}).encode('utf-8')
+                  headers = {'User-Agent': 'Actions', 'Authorization': f'token {gh_token}', 'Accept': 'application/vnd.github.v3+json'}
+                  urllib.request.urlopen(urllib.request.Request(url, data=data, headers=headers), timeout=5)
+              except Exception:
+                  pass
 
-          def edit_title(new_title):
-              if not issue_num or not gh_repo or not gh_token:
-                  return
-              try:
-                  url = f'https://api.github.com/repos/{gh_repo}/issues/{issue_num}'
-                  data = json.dumps({'title': new_title}).encode('utf-8')
-                  req = urllib.request.Request(url, data=data, headers=api_headers, method='PATCH')
-                  urllib.request.urlopen(req, timeout=10)
-              except Exception as e:
-                  print('Edit title error:', e)
-
-          # 1. 解析目标代码仓库 URL
-          target_url = ''
+          # 提取 URL
+          url = ''
           if event_name == 'workflow_dispatch' and input_url:
-              target_url = input_url
+              url = input_url
           else:
               m = re.search(r'https://github\.com/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+', comment_body)
               if not m:
                   m = re.search(r'https://github\.com/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+', issue_body)
               if m:
-                  target_url = m.group(0).rstrip('.')
+                  url = m.group(0).rstrip('.')
 
-          if target_url.endswith('.git'):
-              target_url = target_url[:-4]
+          if url.endswith('.git'):
+              url = url[:-4]
 
-          if not target_url:
-              print('❌ 未在提交内容中找到有效的 GitHub 仓库 URL')
-              post_comment('❌ **评测未启动**：未能从您的提交中解析到有效的 GitHub 仓库地址，请提供如 `https://github.com/username/repo` 的公开仓库链接。')
+          if not url:
+              print('::error::未能从提交内容中找到有效的 GitHub 仓库链接')
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write('valid=false\n')
               sys.exit(0)
 
-          print(f'⚡ 正在极速评测目标仓库: {target_url}')
+          print(f'✅ 解析到有效作业仓库链接: {url}')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('valid=true\n')
+              f.write(f'repo_url={url}\n')
+          "
 
-          # 2. 并发浅克隆学生代码与私有后台引擎
-          shutil.rmtree('./student_code', ignore_errors=True)
-          shutil.rmtree('./backend', ignore_errors=True)
+      - name: 2. 并行拉取学生代码与后台私有库
+        if: steps.parse.outputs.valid == 'true'
+        env:
+          STUDENT_URL: ${{ steps.parse.outputs.repo_url }}
+          SCORES_TOKEN: ${{ secrets.SCORES_TOKEN }}
+        run: |
+          rm -rf ./student_code ./backend
+          echo "::group::正在并行拉取学生代码与后台私有库..."
+          git clone --depth 1 --single-branch "${STUDENT_URL}" ./student_code &
+          git clone --depth 1 --single-branch "https://${SCORES_TOKEN}@github.com/ftl-is-king/homowork-scores.git" ./backend &
+          wait
+          echo "::endgroup::"
+          echo "✅ 代码库与评测后台拉取完成"
 
-          backend_url = f'https://{scores_token}@github.com/ftl-is-king/homowork-scores.git'
-          p_stu = subprocess.Popen(['git', 'clone', '--depth', '1', '--single-branch', target_url, './student_code'])
-          p_bk = subprocess.Popen(['git', 'clone', '--depth', '1', '--single-branch', backend_url, './backend'])
-          p_stu.wait()
-          p_bk.wait()
+      - name: 3. 执行 GCC 编译测试与性能打分 (核心评测运行状况)
+        if: steps.parse.outputs.valid == 'true'
+        id: evaluate
+        run: |
+          python3 ./backend/test.py \
+            --dir ./student_code \
+            --db ./backend/DB.csv \
+            --csv ./backend/test.csv \
+            --no-push \
+            --json-output results.json
 
-          if p_stu.returncode != 0:
-              post_comment(f'❌ **克隆失败**：无法拉取仓库 `{target_url}`，请确认该仓库为 **Public（公开）** 仓库。')
-              sys.exit(0)
+      - name: 4. 生成报告、发送 Issue 成绩回帖并更名
+        if: steps.parse.outputs.valid == 'true' && (github.event_name == 'issues' || github.event_name == 'issue_comment' || github.event.inputs.issue_number != '')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || github.event.inputs.issue_number }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          python3 -c "
+          import json, os, urllib.request
 
-          if p_bk.returncode != 0:
-              post_comment('❌ **后台错误**：未能拉取私有后台评测引擎，请联系管理员核查密钥配置。')
-              sys.exit(0)
+          gh_token = os.environ.get('GH_TOKEN')
+          gh_repo = os.environ.get('GH_REPO')
+          issue_num = os.environ.get('ISSUE_NUMBER')
+          run_id = os.environ.get('RUN_ID')
 
-          # 3. 执行纯标准库极速评测引擎
-          test_cmd = [
-              'python3', './backend/test.py',
-              '--dir', './student_code',
-              '--db', './backend/DB.csv',
-              '--csv', './backend/test.csv',
-              '--no-push',
-              '--json-output', 'results.json'
-          ]
-          res_proc = subprocess.run(test_cmd, capture_output=True, text=True)
-          print(res_proc.stdout)
-          if res_proc.stderr:
-              print(res_proc.stderr)
+          headers = {
+              'User-Agent': 'Actions',
+              'Authorization': f'token {gh_token}',
+              'Accept': 'application/vnd.github.v3+json'
+          }
 
-          # 4. 生成报告并极速回帖 (直连 REST API，耗时 < 200ms)
           if not os.path.exists('results.json'):
-              post_comment('### ❌ 评测执行失败\n未能生成评测结果，请检查代码编译错误或目录结构。')
-              sys.exit(0)
-
-          with open('results.json', 'r', encoding='utf-8') as jf:
-              results = json.load(jf)
-
-          if not results:
-              post_comment('### ⚠️ 未找到有效作业代码\n请确保代码文件命名为 `1_main.c`、`2_xxx.c` 等规范格式。')
-              sys.exit(0)
-
-          lines = ['### 📋 作业自动化评测报告\n']
-          first = results[0]
-          stu_id = first.get('student_id')
-          stu_name = first.get('name')
-
-          if stu_id and stu_name:
-              lines.append(f'**学号**: {stu_id} | **姓名**: {stu_name}\n')
-              # 异步修改 Issue 标题
-              edit_title(f'[作业评测] {stu_id} - {stu_name}')
-
-          lines.append('| 题号 | 文件名 | 测试点 | 运行时间 (ms) | 运行内存 (KB) | 最终得分 | 状态 |')
-          lines.append('|:---:|:---|:---:|:---:|:---:|:---:|:---:|')
-
-          all_passed = True
-          for r in results:
-              prob = r.get('problem', '-')
-              fname = r.get('file', '-')
-              if r.get('success'):
-                  right = r.get('right', '-')
-                  t = r.get('time_ms', 0)
-                  m = r.get('memory_kb', 0)
-                  sc = r.get('score', 0)
-                  status = '✅ 通过' if sc >= 60 else '⚠️ 部分通过'
-                  if sc < 60:
-                      all_passed = False
-                  lines.append(f'| 第 {prob} 题 | `{fname}` | {right} | {t} | {m} | **{sc}** | {status} |')
-              else:
-                  all_passed = False
-                  err = r.get('error', '失败')
-                  lines.append(f'| 第 {prob} 题 | `{fname}` | - | - | - | **0** | ❌ {err} |')
-
-          lines.append('\n---\n')
-          if all_passed:
-              lines.append('> 🎉 **恭喜！提交的代码通过了所有评测标准，成绩已安全登记入库！**')
+              body = '### ❌ 评测执行失败\n未能生成有效评测结果，请检查代码编译错误或目录结构。'
           else:
-              lines.append('> 💡 **提示**：可直接在下方回复任何消息，或编辑原 Issue，系统将在几秒内重新拉取最新代码重测。')
-          if run_id:
-              lines.append(f'\n> ⏱️ **评测耗时**: 约 2~3 秒 | 终端实时日志: [查看 Actions 实时运行](https://github.com/{gh_repo}/actions/runs/{run_id})')
+              with open('results.json', 'r', encoding='utf-8') as jf:
+                  results = json.load(jf)
 
-          # 立即回帖！
-          post_comment('\n'.join(lines))
-          print('✅ 回帖完成！')
+              if not results:
+                  body = '### ⚠️ 未找到有效作业代码\n请确保代码文件命名为 `1_main.c`、`2_xxx.c` 等规范格式。'
+              else:
+                  lines = ['### 📋 作业自动化评测报告\n']
+                  first = results[0]
+                  stu_id = first.get('student_id')
+                  stu_name = first.get('name')
+                  if stu_id and stu_name:
+                      lines.append(f'**学号**: {stu_id} | **姓名**: {stu_name}\n')
+                      try:
+                          title_url = f'https://api.github.com/repos/{gh_repo}/issues/{issue_num}'
+                          t_data = json.dumps({'title': f'[作业评测] {stu_id} - {stu_name}'}).encode('utf-8')
+                          urllib.request.urlopen(urllib.request.Request(title_url, data=t_data, headers=headers, method='PATCH'), timeout=5)
+                      except Exception:
+                          pass
 
-          # 5. 后台静默推送更新成绩至私有仓库
-          subprocess.run(['git', '-C', './backend', 'config', 'user.name', 'github-actions[bot]'], check=False)
-          subprocess.run(['git', '-C', './backend', 'config', 'user.email', 'github-actions[bot]@users.noreply.github.com'], check=False)
-          subprocess.run(['git', '-C', './backend', 'add', 'test.csv'], check=False)
-          subprocess.run(['git', '-C', './backend', 'commit', '-m', 'chore: 自动同步成绩 [skip ci]'], check=False)
-          for _ in range(3):
-              push_r = subprocess.run(['git', '-C', './backend', 'push', 'origin', 'main'], capture_output=True, text=True)
-              if push_r.returncode == 0:
-                  print('🔒 成绩已同步至私有库！')
-                  break
-              subprocess.run(['git', '-C', './backend', 'pull', '--rebase', 'origin', 'main'], check=False)
+                  lines.append('| 题号 | 文件名 | 测试点 | 运行时间 (ms) | 运行内存 (KB) | 最终得分 | 状态 |')
+                  lines.append('|:---:|:---|:---:|:---:|:---:|:---:|:---:|')
 
-          print('⚡ 全流程秒级执行完毕！')
-          EOF
+                  all_passed = True
+                  for r in results:
+                      prob = r.get('problem', '-')
+                      fname = r.get('file', '-')
+                      if r.get('success'):
+                          right = r.get('right', '-')
+                          t = r.get('time_ms', 0)
+                          m = r.get('memory_kb', 0)
+                          sc = r.get('score', 0)
+                          status = '✅ 通过' if sc >= 60 else '⚠️ 部分通过'
+                          if sc < 60:
+                              all_passed = False
+                          lines.append(f'| 第 {prob} 题 | `{fname}` | {right} | {t} | {m} | **{sc}** | {status} |')
+                      else:
+                          all_passed = False
+                          err = r.get('error', '失败')
+                          lines.append(f'| 第 {prob} 题 | `{fname}` | - | - | - | **0** | ❌ {err} |')
+
+                  lines.append('\n---\n')
+                  if all_passed:
+                      lines.append('> 🎉 **恭喜！提交的代码通过了所有评测标准，成绩已安全登记入库！**')
+                  else:
+                      lines.append('> 💡 **提示**：可直接在下方回复任何消息，或编辑原 Issue，系统将在几秒内重新拉取最新代码重测。')
+
+                  if run_id:
+                      lines.append(f'\n> ⏱️ **评测耗时**: 约 2~3 秒 | [查看 Actions 实时运行状况](https://github.com/{gh_repo}/actions/runs/{run_id})')
+
+                  body = '\n'.join(lines)
+
+          comment_url = f'https://api.github.com/repos/{gh_repo}/issues/{issue_num}/comments'
+          c_data = json.dumps({'body': body}).encode('utf-8')
+          urllib.request.urlopen(urllib.request.Request(comment_url, data=c_data, headers=headers), timeout=10)
+          print('✅ 评测报告回帖已完成！')
+          "
+
+      - name: 5. 成绩加密归档至私有数据库 (homowork-scores)
+        if: steps.parse.outputs.valid == 'true'
+        run: |
+          cd backend
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [[ -n $(git status -s test.csv) ]]; then
+            git add test.csv
+            git commit -m "chore: 评测成绩安全同步至私有库 [skip ci]"
+            for i in {1..3}; do
+              if git push origin main; then
+                echo "🔒 成绩已同步并归档至私有仓库 homowork-scores！"
+                break
+              fi
+              git pull --rebase origin main
+              sleep 1
+            done
+          else
+            echo "ℹ️ 私有成绩表 test.csv 无变动或未达到更高分数，跳过提交。"
+          fi
