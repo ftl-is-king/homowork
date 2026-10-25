@@ -46,10 +46,10 @@ class Student:
     学生实体类，负责代码编译、执行评测、性能打分以及成绩归档
     """
 
-    def __init__(self, student_id: int, email: str, name: str, csv_path: str = "test.csv"):
+    def __init__(self, student_id: int, name: str, email: str = "", csv_path: str = "test.csv"):
         self.student_id = student_id
-        self.email = email
         self.name = name
+        self.email = email
         self.csv_path = csv_path
         self.execution_time = None  # 毫秒 (ms)
         self.memory_usage = None    # 千字节 (KB)
@@ -346,7 +346,10 @@ class Student:
 
 def extract_student_info(file_path: str, db_path: str = "DB.csv", test_type: str = ".c") -> Student | None:
     """
-    从代码前三行提取学生学号、邮箱、姓名，并与白名单数据库 DB.csv 校验
+    从代码前两行（或前三行）提取学生学号与姓名，并与白名单数据库 DB.csv 校验
+    规则：
+    - 第 1 行：学号 (// 202401010001)
+    - 第 2 行：姓名 (// 张三) [若包含邮箱注释亦可智能识别提取姓名]
     """
     if not os.path.exists(file_path):
         print(f"❌ 找不到文件: {file_path}")
@@ -354,31 +357,47 @@ def extract_student_info(file_path: str, db_path: str = "DB.csv", test_type: str
 
     try:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-            first_line = f.readline()
-            second_line = f.readline()
-            third_line = f.readline()
+            lines = [f.readline() for _ in range(5)]
 
         comment_prefix = "//" if test_type == ".c" else "#"
-        # 兼容宽松学号规则 (数字连续7位及以上)
-        match_id = re.search(rf"{comment_prefix}\s*(\d{{7,15}})", first_line)
-        match_email = re.search(rf"{comment_prefix}\s*([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", second_line)
-        match_name = re.search(rf"{comment_prefix}\s*(\S+)", third_line)
 
-        if not match_id:
-            print(f"❌ [{file_path}] 第1行学号提取失败，请确保格式为: {comment_prefix} 学号")
+        student_id = None
+        name = None
+        email = ""
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            if not line.startswith(comment_prefix):
+                continue
+            body = line[len(comment_prefix):].strip()
+
+            # 提取学号（纯数字连续 7~15 位）
+            if not student_id:
+                id_match = re.match(r"^(\d{7,15})$", body)
+                if id_match:
+                    student_id = int(id_match.group(1))
+                    continue
+
+            # 匹配邮箱（可选，不作强制要求）
+            if not email and re.match(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$", body):
+                email = body
+                continue
+
+            # 提取姓名（非空字符串，排除纯符号或注释块开始）
+            if not name and body and not body.startswith("/*") and not body.startswith("*"):
+                name = body
+                continue
+
+        if not student_id:
+            print(f"❌ [{file_path}] 学号提取失败，请确保代码前两行包含: {comment_prefix} 学号")
             return None
-        if not match_email:
-            print(f"❌ [{file_path}] 第2行邮箱提取失败，请确保格式为: {comment_prefix} 邮箱")
-            return None
-        if not match_name:
-            print(f"❌ [{file_path}] 第3行姓名提取失败，请确保格式为: {comment_prefix} 姓名")
+        if not name:
+            print(f"❌ [{file_path}] 姓名提取失败，请确保代码前两行包含: {comment_prefix} 姓名")
             return None
 
-        student_id = int(match_id.group(1))
-        email = match_email.group(1).strip()
-        name = match_name.group(1).strip()
-
-        # 白名单数据库核验
+        # 白名单数据库核验（仅核对学号与姓名）
         if os.path.exists(db_path):
             try:
                 db_df = pd.read_csv(db_path, dtype={"id": int, "学号": int})
@@ -400,7 +419,7 @@ def extract_student_info(file_path: str, db_path: str = "DB.csv", test_type: str
         else:
             print(f"ℹ️ 未检测到学生数据库 {db_path}，跳过白名单强校验。")
 
-        return Student(student_id, email, name)
+        return Student(student_id=student_id, name=name, email=email)
 
     except Exception as e:
         print(f"❌ 提取学生信息失败: {e}")
