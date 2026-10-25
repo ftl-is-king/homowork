@@ -19,7 +19,7 @@
 
 ## 提交作业方式
 在 [ftl-is-king/homowork/issues](https://github.com/ftl-is-king/homowork/issues) 点击 **New Issue**：
-- **标题（Title）**：直接保留默认的 `[作业提交]` 即可（系统会自动从代码提取学号姓名并重命名）
+- **标题（Title）**：直接保留默认的 `[作业提交]` 即可（评测完成后自动标记为 `[作业评测已完成]`，不公开展示学号与姓名）
 - **正文（Body）**：直接粘贴你本代码仓库的公开 GitHub 网址（例如 `https://github.com/your-username/my-c-hw`）
 
 ## 修改代码后如何重新评测？
