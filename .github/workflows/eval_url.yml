@@ -138,11 +138,13 @@ jobs:
         run: |
           python3 - << 'PYEOF'
           import json, os, urllib.request
+          from datetime import datetime, timedelta
 
           gh_repo = os.environ.get('GH_REPO', '')
           gh_token = os.environ.get('GH_TOKEN', '')
           issue_num = os.environ.get('ISSUE_NUMBER', '')
           run_id = os.environ.get('RUN_ID', '')
+          submit_time = (datetime.now() + timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
 
           api_headers = {
               'User-Agent': 'Actions',
@@ -170,8 +172,8 @@ jobs:
                   if stu_id and stu_name:
                       lines.append(f'**学号**: {stu_id} | **姓名**: {stu_name}\n')
 
-                  lines.append('| 题号 | 文件名 | 测试点 | 运行时间 (ms) | 运行内存 (KB) | 最终得分 | 状态 |')
-                  lines.append('|:---:|:---|:---:|:---:|:---:|:---:|:---:|')
+                  lines.append('| 题号 | 文件名 | 测试点 | 运行时间 (ms) | 运行内存 (KB) | 最终得分 | 状态 | 提交时间 |')
+                  lines.append('|:---:|:---|:---:|:---:|:---:|:---:|:---:|:---:|')
 
                   all_passed = True
                   for r in results:
@@ -185,11 +187,11 @@ jobs:
                           status = '✅ 通过' if sc >= 60 else '⚠️ 部分通过'
                           if sc < 60:
                               all_passed = False
-                          lines.append(f'| 第 {prob} 题 | `{fname}` | {right} | {t} | {m} | **{sc}** | {status} |')
+                          lines.append(f'| 第 {prob} 题 | `{fname}` | {right} | {t} | {m} | **{sc}** | {status} | {submit_time} |')
                       else:
                           all_passed = False
                           err = r.get('error', '失败')
-                          lines.append(f'| 第 {prob} 题 | `{fname}` | - | - | - | **0** | ❌ {err} |')
+                          lines.append(f'| 第 {prob} 题 | `{fname}` | - | - | - | **0** | ❌ {err} | {submit_time} |')
 
                   lines.append('\n---\n')
                   if all_passed:
