@@ -27,13 +27,16 @@ permissions:
 
 jobs:
   evaluate-submission:
-    # 核心防循环：过滤机器人自身，且严禁触发针对评测报告自身的评论
+    # 核心防循环：过滤机器人自身，针对 issue_comment 严禁触发报告自身的评论
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (
         github.actor != 'github-actions[bot]' &&
         github.event.sender.type != 'Bot' &&
-        !contains(github.event.comment.body, '作业自动化评测报告') &&
+        (
+          github.event_name == 'issues' ||
+          (github.event_name == 'issue_comment' && !contains(github.event.comment.body, '作业自动化评测报告'))
+        ) &&
         (
           contains(github.event.issue.labels.*.name, 'homework-submission') ||
           contains(github.event.issue.title, '作业') ||
