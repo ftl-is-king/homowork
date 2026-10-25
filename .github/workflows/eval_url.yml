@@ -16,6 +16,10 @@ on:
         required: false
         type: string
 
+concurrency:
+  group: eval-${{ github.event.issue.number || github.event.inputs.issue_number || github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
   issues: write
@@ -49,6 +53,7 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.inputs.issue_number }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_ID: ${{ github.event.comment.id }}
         run: |
           python3 - << 'PYEOF'
           import os, sys, re, json, urllib.request
@@ -57,17 +62,24 @@ jobs:
           input_url = os.environ.get('INPUT_REPO_URL', '').strip()
           issue_body = os.environ.get('ISSUE_BODY', '')
           comment_body = os.environ.get('COMMENT_BODY', '')
+          comment_id = os.environ.get('COMMENT_ID', '')
           gh_repo = os.environ.get('GH_REPO', '')
           gh_token = os.environ.get('GH_TOKEN', '')
           issue_num = os.environ.get('ISSUE_NUMBER', '')
 
-          # 即时点亮眼睛反应
-          if issue_num and gh_repo and gh_token:
+          # 0. 瞬间为用户评论或 Issue 点亮接单 👀 眼睛表情（给学生秒级视觉确认）
+          if gh_repo and gh_token:
               try:
-                  url = f'https://api.github.com/repos/{gh_repo}/issues/{issue_num}/reactions'
-                  data = json.dumps({'content': 'eyes'}).encode('utf-8')
-                  headers = {'User-Agent': 'Actions', 'Authorization': f'token {gh_token}', 'Accept': 'application/vnd.github.v3+json'}
-                  urllib.request.urlopen(urllib.request.Request(url, data=data, headers=headers), timeout=5)
+                  if comment_id:
+                      u = f'https://api.github.com/repos/{gh_repo}/issues/comments/{comment_id}/reactions'
+                  elif issue_num:
+                      u = f'https://api.github.com/repos/{gh_repo}/issues/{issue_num}/reactions'
+                  else:
+                      u = ''
+                  if u:
+                      data = json.dumps({'content': 'eyes'}).encode('utf-8')
+                      headers = {'User-Agent': 'Actions', 'Authorization': f'token {gh_token}', 'Accept': 'application/vnd.github.v3+json'}
+                      urllib.request.urlopen(urllib.request.Request(u, data=data, headers=headers), timeout=5)
               except Exception:
                   pass
 
@@ -121,8 +133,8 @@ jobs:
         run: |
           rm -rf ./student_code ./backend
           echo "::group::正在并行拉取代码与后台..."
-          git clone --depth 1 --single-branch "${STUDENT_URL}" ./student_code &
-          git clone --depth 1 --single-branch "https://${SCORES_TOKEN}@github.com/ftl-is-king/homowork-scores.git" ./backend &
+          git clone --depth 1 --single-branch --no-tags "${STUDENT_URL}" ./student_code &
+          git clone --depth 1 --single-branch --no-tags "https://${SCORES_TOKEN}@github.com/ftl-is-king/homowork-scores.git" ./backend &
           wait
           echo "::endgroup::"
           echo "✅ 代码库与评测后台拉取完成"
@@ -145,6 +157,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.inputs.issue_number }}
           RUN_ID: ${{ github.run_id }}
+          COMMENT_ID: ${{ github.event.comment.id }}
         run: |
           python3 - << 'PYEOF'
           import json, os, urllib.request
@@ -154,6 +167,7 @@ jobs:
           gh_token = os.environ.get('GH_TOKEN', '')
           issue_num = os.environ.get('ISSUE_NUMBER', '')
           run_id = os.environ.get('RUN_ID', '')
+          comment_id = os.environ.get('COMMENT_ID', '')
           submit_time = (datetime.now() + timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
 
           api_headers = {
@@ -232,6 +246,15 @@ jobs:
               print('✅ 评测报告新回复已发表！')
           except Exception as e:
               print('Post comment error:', e)
+
+          # 3. 为用户刚才的评论点亮 rocket 🚀 表情（表明评测已成功结束）
+          if comment_id and gh_repo and gh_token:
+              try:
+                  rk_url = f'https://api.github.com/repos/{gh_repo}/issues/comments/{comment_id}/reactions'
+                  rk_data = json.dumps({'content': 'rocket'}).encode('utf-8')
+                  urllib.request.urlopen(urllib.request.Request(rk_url, data=rk_data, headers=api_headers), timeout=5)
+              except Exception:
+                  pass
           PYEOF
 
       - name: 5. 成绩加密归档至私有数据库 (homowork-scores)
