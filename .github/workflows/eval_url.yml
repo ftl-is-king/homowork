@@ -27,22 +27,8 @@ permissions:
 
 jobs:
   evaluate-submission:
-    # 核心防循环：过滤机器人自身，针对 issue_comment 严禁触发报告自身的评论
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (
-        github.actor != 'github-actions[bot]' &&
-        github.event.sender.type != 'Bot' &&
-        (
-          github.event_name == 'issues' ||
-          (github.event_name == 'issue_comment' && !contains(github.event.comment.body, '作业自动化评测报告'))
-        ) &&
-        (
-          contains(github.event.issue.labels.*.name, 'homework-submission') ||
-          contains(github.event.issue.title, '作业') ||
-          contains(github.event.issue.title, 'homework')
-        )
-      )
+    # 过滤掉机器人自身发表的任何动作
+    if: github.actor != 'github-actions[bot]' && github.event.sender.type != 'Bot'
     runs-on: ubuntu-latest
 
     steps:
@@ -54,6 +40,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_REPO_URL: ${{ github.event.inputs.repo_url }}
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.inputs.issue_number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           COMMENT_BODY: ${{ github.event.comment.body }}
           COMMENT_ID: ${{ github.event.comment.id }}
@@ -63,6 +50,7 @@ jobs:
 
           event_name = os.environ.get('EVENT_NAME', '')
           input_url = os.environ.get('INPUT_REPO_URL', '').strip()
+          issue_title = os.environ.get('ISSUE_TITLE', '')
           issue_body = os.environ.get('ISSUE_BODY', '')
           comment_body = os.environ.get('COMMENT_BODY', '')
           comment_id = os.environ.get('COMMENT_ID', '')
@@ -70,7 +58,18 @@ jobs:
           gh_token = os.environ.get('GH_TOKEN', '')
           issue_num = os.environ.get('ISSUE_NUMBER', '')
 
-          # 0. 瞬间为用户评论或 Issue 点亮接单 👀 眼睛表情（给学生秒级视觉确认）
+          # 如果是评论触发，且该评论是系统评测报告自身，则直接忽略退出（防循环）
+          if event_name == 'issue_comment' and '### 📋 作业自动化评测报告' in comment_body:
+              print('ℹ️ 检测到系统自动回复的评测报告，跳过执行以防死循环。')
+              sys.exit(0)
+
+          # 校验是否为作业提交帖（标题包含作业或 homework）
+          is_homework = ('作业' in issue_title or 'homework' in issue_title.lower() or '作业' in issue_body or event_name == 'workflow_dispatch')
+          if not is_homework:
+              print(f'ℹ️ 该 Issue（标题：{issue_title}）不是作业提交帖，跳过。')
+              sys.exit(0)
+
+          # 0. 瞬间为用户评论或 Issue 点亮接单 👀 眼睛表情（秒级即时视觉反馈）
           if gh_repo and gh_token:
               try:
                   if comment_id:
