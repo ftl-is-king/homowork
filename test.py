@@ -396,18 +396,39 @@ def extract_student_info(file_path: str, db_path: str = "DB.csv", test_type: str
 def get_submission_files(directory: str, test_type: str = ".c") -> list:
     """
     检索指定目录下的作业代码文件（按文件名开头的题号排序）
+    支持根目录直属文件，以及子目录（如 src/、student_template/）递归查找
     """
     if not os.path.isdir(directory):
         return []
 
     files = []
+    # 1. 优先检索根目录
     for filename in os.listdir(directory):
-        if filename.endswith(test_type):
+        full_path = os.path.join(directory, filename)
+        if os.path.isfile(full_path) and filename.endswith(test_type):
             match = re.match(r"^(\d+)_.*", filename)
             if match:
                 files.append((int(match.group(1)), filename))
             elif filename == f"main{test_type}":
                 files.append((1, filename))
+
+    # 2. 若根目录下未找到，检索一级子目录（如 src/ 或子文件夹）
+    if not files:
+        for root, dirs, filenames in os.walk(directory):
+            # 忽略隐藏目录与 Git 目录
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            if root == directory:
+                continue
+            for filename in filenames:
+                if filename.endswith(test_type):
+                    rel_path = os.path.relpath(os.path.join(root, filename), directory)
+                    match = re.match(r"^(\d+)_.*", filename)
+                    if match:
+                        files.append((int(match.group(1)), rel_path))
+                    elif filename == f"main{test_type}":
+                        files.append((1, rel_path))
+            if files:
+                break
 
     files.sort(key=lambda x: x[0])
     return files
