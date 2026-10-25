@@ -45,28 +45,14 @@ jobs:
           ISSUE_BODY: ${{ github.event.issue.body }}
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          python3 -c "
-          import os, sys, re, json, urllib.request
+          python3 - << 'PYEOF'
+          import os, sys, re
 
-          gh_token = os.environ.get('GH_TOKEN', '')
-          gh_repo = os.environ.get('GH_REPO', '')
           event_name = os.environ.get('EVENT_NAME', '')
-          issue_num = os.environ.get('ISSUE_NUMBER', '')
           input_url = os.environ.get('INPUT_REPO_URL', '').strip()
           comment_body = os.environ.get('COMMENT_BODY', '')
           issue_body = os.environ.get('ISSUE_BODY', '')
 
-          # 立即为 Issue 点亮已接单图标
-          if issue_num and gh_repo and gh_token:
-              try:
-                  url = f'https://api.github.com/repos/{gh_repo}/issues/{issue_num}/reactions'
-                  data = json.dumps({'content': 'eyes'}).encode('utf-8')
-                  headers = {'User-Agent': 'Actions', 'Authorization': f'token {gh_token}', 'Accept': 'application/vnd.github.v3+json'}
-                  urllib.request.urlopen(urllib.request.Request(url, data=data, headers=headers), timeout=5)
-              except Exception:
-                  pass
-
-          # 提取 URL
           url = ''
           if event_name == 'workflow_dispatch' and input_url:
               url = input_url
@@ -86,11 +72,20 @@ jobs:
                   f.write('valid=false\n')
               sys.exit(0)
 
-          print(f'✅ 解析到有效作业仓库链接: {url}')
+          print(f'⚡ 解析到有效作业仓库链接: {url}')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write('valid=true\n')
               f.write(f'repo_url={url}\n')
-          "
+          PYEOF
+
+      - name: 校验失败通知
+        if: steps.parse.outputs.valid == 'false' && (github.event_name == 'issues' || github.event_name == 'issue_comment')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$GH_REPO" --body "❌ **评测未启动**：未能从您的提交内容中解析到有效的 GitHub 仓库地址，请检查并提供如 \`https://github.com/username/repo\` 的链接。"
 
       - name: 2. 并行拉取学生代码与后台私有库
         if: steps.parse.outputs.valid == 'true'
@@ -99,7 +94,7 @@ jobs:
           SCORES_TOKEN: ${{ secrets.SCORES_TOKEN }}
         run: |
           rm -rf ./student_code ./backend
-          echo "::group::正在并行拉取学生代码与后台私有库..."
+          echo "::group::正在并行拉取代码与后台..."
           git clone --depth 1 --single-branch "${STUDENT_URL}" ./student_code &
           git clone --depth 1 --single-branch "https://${SCORES_TOKEN}@github.com/ftl-is-king/homowork-scores.git" ./backend &
           wait
@@ -125,28 +120,21 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.inputs.issue_number }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          python3 -c "
-          import json, os, urllib.request
+          python3 - << 'PYEOF'
+          import json, os, subprocess
 
-          gh_token = os.environ.get('GH_TOKEN')
-          gh_repo = os.environ.get('GH_REPO')
-          issue_num = os.environ.get('ISSUE_NUMBER')
-          run_id = os.environ.get('RUN_ID')
-
-          headers = {
-              'User-Agent': 'Actions',
-              'Authorization': f'token {gh_token}',
-              'Accept': 'application/vnd.github.v3+json'
-          }
+          gh_repo = os.environ.get('GH_REPO', '')
+          issue_num = os.environ.get('ISSUE_NUMBER', '')
+          run_id = os.environ.get('RUN_ID', '')
 
           if not os.path.exists('results.json'):
-              body = '### ❌ 评测执行失败\n未能生成有效评测结果，请检查代码编译错误或目录结构。'
+              body = '### ❌ 评测执行失败\n未能生成有效评测结果，请检查代码目录结构或编译错误。'
           else:
               with open('results.json', 'r', encoding='utf-8') as jf:
                   results = json.load(jf)
 
               if not results:
-                  body = '### ⚠️ 未找到有效作业代码\n请确保代码文件命名为 `1_main.c`、`2_xxx.c` 等规范格式。'
+                  body = '### ⚠️ 未找到有效作业代码\n请确保作业文件命名为 `1_main.c`、`2_xxx.c` 等规范格式。'
               else:
                   lines = ['### 📋 作业自动化评测报告\n']
                   first = results[0]
@@ -154,12 +142,8 @@ jobs:
                   stu_name = first.get('name')
                   if stu_id and stu_name:
                       lines.append(f'**学号**: {stu_id} | **姓名**: {stu_name}\n')
-                      try:
-                          title_url = f'https://api.github.com/repos/{gh_repo}/issues/{issue_num}'
-                          t_data = json.dumps({'title': f'[作业评测] {stu_id} - {stu_name}'}).encode('utf-8')
-                          urllib.request.urlopen(urllib.request.Request(title_url, data=t_data, headers=headers, method='PATCH'), timeout=5)
-                      except Exception:
-                          pass
+                      new_title = f'[作业评测] {stu_id} - {stu_name}'
+                      subprocess.run(['gh', 'issue', 'edit', str(issue_num), '--repo', gh_repo, '--title', new_title], check=False)
 
                   lines.append('| 题号 | 文件名 | 测试点 | 运行时间 (ms) | 运行内存 (KB) | 最终得分 | 状态 |')
                   lines.append('|:---:|:---|:---:|:---:|:---:|:---:|:---:|')
@@ -193,11 +177,12 @@ jobs:
 
                   body = '\n'.join(lines)
 
-          comment_url = f'https://api.github.com/repos/{gh_repo}/issues/{issue_num}/comments'
-          c_data = json.dumps({'body': body}).encode('utf-8')
-          urllib.request.urlopen(urllib.request.Request(comment_url, data=c_data, headers=headers), timeout=10)
-          print('✅ 评测报告回帖已完成！')
-          "
+          with open('comment_body.md', 'w', encoding='utf-8') as f:
+              f.write(body)
+          PYEOF
+
+          gh issue comment "$ISSUE_NUMBER" --repo "$GH_REPO" --body-file comment_body.md
+          echo "✅ 评测报告回帖已完成！"
 
       - name: 5. 成绩加密归档至私有数据库 (homowork-scores)
         if: steps.parse.outputs.valid == 'true'
