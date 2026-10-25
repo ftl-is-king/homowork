@@ -1,31 +1,24 @@
-# 编译产物
+# 编译与运行时临时产物
 *.out
 *.exe
 *.o
 *.obj
 *.so
 *.dylib
-
-# Python 缓存
 __pycache__/
 *.py[cod]
 *$py.class
-.pytest_cache/
-
-# 评测临时运行产物
 results.json
 comment_body.md
 student_code/
 test_system/
+backend/
 private_data/
 push_workflows.ps1
 
-# 隐私敏感数据 (转移至私有仓库 homowork-scores 存储)
+# 后台私有文件（迁移至 homowork-scores 仓库存储）
+config.py
+test.py
+requirements.txt
 DB.csv
 test.csv
-
-# IDE 与操作系统
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
