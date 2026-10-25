@@ -44,6 +44,7 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.inputs.issue_number }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           COMMENT_BODY: ${{ github.event.comment.body }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           python3 - << 'EOF'
           import os, sys, re, json, urllib.request, subprocess, shutil
@@ -56,12 +57,22 @@ jobs:
           input_url = os.environ.get('INPUT_REPO_URL', '').strip()
           comment_body = os.environ.get('COMMENT_BODY', '')
           issue_body = os.environ.get('ISSUE_BODY', '')
+          run_id = os.environ.get('RUN_ID', '')
 
           api_headers = {
               'User-Agent': 'Actions-Auto-Eval',
               'Authorization': f'token {gh_token}',
               'Accept': 'application/vnd.github.v3+json'
           }
+
+          # 0. 瞬间为 Issue 点亮“已接单”眼睛图标（即时视觉确认）
+          try:
+              react_url = f'https://api.github.com/repos/{gh_repo}/issues/{issue_num}/reactions'
+              react_data = json.dumps({'content': 'eyes'}).encode('utf-8')
+              req = urllib.request.Request(react_url, data=react_data, headers=api_headers)
+              urllib.request.urlopen(req, timeout=5)
+          except Exception:
+              pass
 
           def post_comment(text):
               if not issue_num or not gh_repo or not gh_token:
@@ -186,6 +197,8 @@ jobs:
               lines.append('> 🎉 **恭喜！提交的代码通过了所有评测标准，成绩已安全登记入库！**')
           else:
               lines.append('> 💡 **提示**：可直接在下方回复任何消息，或编辑原 Issue，系统将在几秒内重新拉取最新代码重测。')
+          if run_id:
+              lines.append(f'\n> ⏱️ **评测耗时**: 约 2~3 秒 | 终端实时日志: [查看 Actions 实时运行](https://github.com/{gh_repo}/actions/runs/{run_id})')
 
           # 立即回帖！
           post_comment('\n'.join(lines))
