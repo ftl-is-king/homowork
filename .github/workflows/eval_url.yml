@@ -129,12 +129,9 @@ jobs:
           REASON: ${{ steps.parse.outputs.error_reason }}
         run: |
           if [ "$REASON" = "template_url" ]; then
-            MSG="### ❌ 提交未启动：占位符链接未修改
-您提交的内容中包含默认模板链接 \`https://github.com/your-username/your-repo\`。
-请编辑本 Issue，将其替换为你存放作业代码的**真实公开 GitHub 仓库网址**后保存。"
+            MSG=$'### ❌ 提交未启动：占位符链接未修改\n您提交的内容中包含默认模板链接 `https://github.com/your-username/your-repo`。\n请编辑本 Issue，将其替换为你存放作业代码的**真实公开 GitHub 仓库网址**后保存。'
           else
-            MSG="### ❌ 提交未启动：未找到有效链接
-未能从您的提交内容中解析到有效的 GitHub 仓库地址，请提供如 \`https://github.com/username/repo\` 的公开仓库链接。"
+            MSG=$'### ❌ 提交未启动：未找到有效链接\n未能从您的提交内容中解析到有效的 GitHub 仓库地址，请提供如 `https://github.com/username/repo` 的公开仓库链接。'
           fi
           gh issue comment "$ISSUE_NUMBER" --repo "$GH_REPO" --body "$MSG"
 
