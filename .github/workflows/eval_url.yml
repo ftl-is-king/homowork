@@ -27,7 +27,7 @@ permissions:
 
 jobs:
   evaluate-submission:
-    # 过滤掉机器人自身发表的任何动作
+    # 过滤掉机器人本身发表的动作（GitHub 官方原生机制防死循环，无需任何关键词匹配）
     if: github.actor != 'github-actions[bot]' && github.event.sender.type != 'Bot'
     runs-on: ubuntu-latest
 
@@ -35,7 +35,7 @@ jobs:
       - name: 1. 解析作业 URL 并标记已接单
         id: parse
         env:
-          GH_TOKEN: ${{ secrets.SCORES_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
           INPUT_REPO_URL: ${{ github.event.inputs.repo_url }}
@@ -58,20 +58,13 @@ jobs:
           gh_token = os.environ.get('GH_TOKEN', '')
           issue_num = os.environ.get('ISSUE_NUMBER', '')
 
-          # 核心防循环：如果是评论触发，只要包含任何系统提示关键词，坚决直接退出！
-          if event_name == 'issue_comment':
-              bot_keywords = ['评测', '报告', '❌', '📋', '⚠️', '失败', '克隆', '未启动']
-              if any(k in comment_body for k in bot_keywords) or comment_body.strip().startswith('###'):
-                  print('ℹ️ 检测到系统自动回复的通知或报告，立即退出以彻底杜绝死循环。')
-                  sys.exit(0)
-
-          # 校验是否为作业帖
+          # 校验是否为作业提交帖
           is_homework = ('作业' in issue_title or 'homework' in issue_title.lower() or '作业' in issue_body or event_name == 'workflow_dispatch')
           if not is_homework:
               print(f'ℹ️ 该 Issue 不是作业提交帖，跳过。')
               sys.exit(0)
 
-          # 0. 瞬间为用户评论或 Issue 点亮接单 👀 眼睛表情（秒级即时视觉反馈）
+          # 0. 为用户评论或 Issue 点亮接单 👀 眼睛表情（即时视觉确认）
           if gh_repo and gh_token:
               try:
                   if comment_id:
@@ -108,7 +101,7 @@ jobs:
 
           # 检查是否误提交了默认占位符模板链接
           if 'your-username' in target_url or 'your-repo' in target_url:
-              print('❌ 学生提交了未修改的默认模板占位链接')
+              print('❌ 提交了默认模板占位链接')
               with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
                   f.write('valid=false\n')
                   f.write('error_reason=template_url\n')
@@ -130,7 +123,7 @@ jobs:
       - name: 校验失败通知
         if: steps.parse.outputs.valid == 'false' && (github.event_name == 'issues' || github.event_name == 'issue_comment')
         env:
-          GH_TOKEN: ${{ secrets.SCORES_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           REASON: ${{ steps.parse.outputs.error_reason }}
@@ -177,7 +170,7 @@ jobs:
       - name: 4. 生成报告、发送 Issue 成绩回帖并更名
         if: steps.parse.outputs.valid == 'true' && (github.event_name == 'issues' || github.event_name == 'issue_comment' || github.event.inputs.issue_number != '')
         env:
-          GH_TOKEN: ${{ secrets.SCORES_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.inputs.issue_number }}
           RUN_ID: ${{ github.run_id }}
@@ -206,25 +199,16 @@ jobs:
 
           if clone_failed == 'true':
               body = f"### ❌ 代码仓库克隆失败\n无法拉取代码仓库：`{student_url}`。\n\n**可能原因**：\n1. 该仓库不是 **Public（公开）** 仓库（请进入该仓库 Settings -> Change visibility 改为 Public）；\n2. 仓库 URL 拼写有误或已被删除。"
-              stu_id = None
-              stu_name = None
           elif not os.path.exists('results.json'):
               body = '### ❌ 评测执行失败\n未能生成有效评测结果，请检查代码编译错误或目录结构。'
-              stu_id = None
-              stu_name = None
           else:
               with open('results.json', 'r', encoding='utf-8') as jf:
                   results = json.load(jf)
 
               if not results:
                   body = '### ⚠️ 未找到有效作业代码\n请确保代码文件命名为 `1_main.c`、`2_xxx.c` 等规范格式。'
-                  stu_id = None
-                  stu_name = None
               else:
                   lines = ['### 📋 作业自动化评测报告\n']
-                  first = results[0]
-                  stu_id = first.get('student_id')
-                  stu_name = first.get('name')
 
                   lines.append('| 题号 | 文件名 | 测试点 | 运行时间 (ms) | 运行内存 (KB) | 最终得分 | 状态 | 提交时间 |')
                   lines.append('|:---:|:---|:---:|:---:|:---:|:---:|:---:|:---:|')
@@ -268,12 +252,12 @@ jobs:
               except Exception as e:
                   print('Update title error:', e)
 
-          # 2. 发表回复
+          # 2. 发表官方回复（由 github-actions[bot] 发帖，天然受 GitHub 原生机制防循环保护）
           try:
               post_url = f'https://api.github.com/repos/{gh_repo}/issues/{issue_num}/comments'
               post_data = json.dumps({'body': body}).encode('utf-8')
               urllib.request.urlopen(urllib.request.Request(post_url, data=post_data, headers=api_headers), timeout=10)
-              print('✅ 评测报告新回复已发表！')
+              print('✅ 官方评测报告新回复已发表！')
           except Exception as e:
               print('Post comment error:', e)
 
