@@ -58,15 +58,17 @@ jobs:
           gh_token = os.environ.get('GH_TOKEN', '')
           issue_num = os.environ.get('ISSUE_NUMBER', '')
 
-          # 如果是评论触发，且该评论是系统评测报告自身，则直接忽略退出（防循环）
-          if event_name == 'issue_comment' and '### 📋 作业自动化评测报告' in comment_body:
-              print('ℹ️ 检测到系统自动回复的评测报告，跳过执行以防死循环。')
-              sys.exit(0)
+          # 核心防循环：如果是评论触发，只要包含任何系统提示关键词，坚决直接退出！
+          if event_name == 'issue_comment':
+              bot_keywords = ['评测', '报告', '❌', '📋', '⚠️', '失败', '克隆', '未启动']
+              if any(k in comment_body for k in bot_keywords) or comment_body.strip().startswith('###'):
+                  print('ℹ️ 检测到系统自动回复的通知或报告，立即退出以彻底杜绝死循环。')
+                  sys.exit(0)
 
-          # 校验是否为作业提交帖（标题包含作业或 homework）
+          # 校验是否为作业帖
           is_homework = ('作业' in issue_title or 'homework' in issue_title.lower() or '作业' in issue_body or event_name == 'workflow_dispatch')
           if not is_homework:
-              print(f'ℹ️ 该 Issue（标题：{issue_title}）不是作业提交帖，跳过。')
+              print(f'ℹ️ 该 Issue 不是作业提交帖，跳过。')
               sys.exit(0)
 
           # 0. 瞬间为用户评论或 Issue 点亮接单 👀 眼睛表情（秒级即时视觉反馈）
@@ -100,16 +102,23 @@ jobs:
                   if clean_repo != 'homowork' and clean_repo != 'homowork-scores':
                       target_url = f'https://github.com/{owner}/{clean_repo}'
                       break
-              if not target_url and matches:
-                  target_url = f'https://github.com/{matches[0][0]}/{matches[0][1].rstrip(".")}'
 
           if target_url.endswith('.git'):
               target_url = target_url[:-4]
+
+          # 检查是否误提交了默认占位符模板链接
+          if 'your-username' in target_url or 'your-repo' in target_url:
+              print('❌ 学生提交了未修改的默认模板占位链接')
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write('valid=false\n')
+                  f.write('error_reason=template_url\n')
+              sys.exit(0)
 
           if not target_url:
               print('::error::未能从提交内容中找到有效的学生作业代码仓库链接')
               with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
                   f.write('valid=false\n')
+                  f.write('error_reason=no_url\n')
               sys.exit(0)
 
           print(f'⚡ 解析到有效学生作业仓库链接: {target_url}')
@@ -124,8 +133,17 @@ jobs:
           GH_TOKEN: ${{ secrets.SCORES_TOKEN }}
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REASON: ${{ steps.parse.outputs.error_reason }}
         run: |
-          gh issue comment "$ISSUE_NUMBER" --repo "$GH_REPO" --body "❌ **评测未启动**：未能从您的提交内容中解析到有效的 GitHub 仓库地址，请检查并提供如 \`https://github.com/username/repo\` 的链接。"
+          if [ "$REASON" = "template_url" ]; then
+            MSG="### ❌ 提交未启动：占位符链接未修改
+您提交的内容中包含默认模板链接 \`https://github.com/your-username/your-repo\`。
+请编辑本 Issue，将其替换为你存放作业代码的**真实公开 GitHub 仓库网址**后保存。"
+          else
+            MSG="### ❌ 提交未启动：未找到有效链接
+未能从您的提交内容中解析到有效的 GitHub 仓库地址，请提供如 \`https://github.com/username/repo\` 的公开仓库链接。"
+          fi
+          gh issue comment "$ISSUE_NUMBER" --repo "$GH_REPO" --body "$MSG"
 
       - name: 2. 并行拉取学生代码与后台私有库
         if: steps.parse.outputs.valid == 'true'
@@ -134,15 +152,19 @@ jobs:
           SCORES_TOKEN: ${{ secrets.SCORES_TOKEN }}
         run: |
           rm -rf ./student_code ./backend
-          echo "::group::正在并行拉取代码与后台..."
-          git clone --depth 1 --single-branch --no-tags "${STUDENT_URL}" ./student_code &
-          git clone --depth 1 --single-branch --no-tags "https://${SCORES_TOKEN}@github.com/ftl-is-king/homowork-scores.git" ./backend &
-          wait
+          echo "::group::正在拉取评测后台与学生代码..."
+          git clone --depth 1 --single-branch --no-tags "https://${SCORES_TOKEN}@github.com/ftl-is-king/homowork-scores.git" ./backend
+          if ! git clone --depth 1 --single-branch --no-tags "${STUDENT_URL}" ./student_code; then
+            echo "CLONE_FAILED=true" >> $GITHUB_ENV
+            echo "❌ 学生仓库克隆失败"
+          else
+            echo "CLONE_FAILED=false" >> $GITHUB_ENV
+            echo "✅ 学生仓库克隆成功"
+          fi
           echo "::endgroup::"
-          echo "✅ 代码库与评测后台拉取完成"
 
       - name: 3. 执行 GCC 编译测试与性能打分 (核心评测运行状况)
-        if: steps.parse.outputs.valid == 'true'
+        if: steps.parse.outputs.valid == 'true' && env.CLONE_FAILED != 'true'
         id: evaluate
         run: |
           python3 ./backend/test.py \
@@ -160,6 +182,8 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.inputs.issue_number }}
           RUN_ID: ${{ github.run_id }}
           COMMENT_ID: ${{ github.event.comment.id }}
+          CLONE_FAILED: ${{ env.CLONE_FAILED }}
+          STUDENT_URL: ${{ steps.parse.outputs.repo_url }}
         run: |
           python3 - << 'PYEOF'
           import json, os, urllib.request
@@ -170,6 +194,8 @@ jobs:
           issue_num = os.environ.get('ISSUE_NUMBER', '')
           run_id = os.environ.get('RUN_ID', '')
           comment_id = os.environ.get('COMMENT_ID', '')
+          clone_failed = os.environ.get('CLONE_FAILED', '')
+          student_url = os.environ.get('STUDENT_URL', '')
           submit_time = (datetime.now() + timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
 
           api_headers = {
@@ -178,8 +204,12 @@ jobs:
               'Accept': 'application/vnd.github.v3+json'
           }
 
-          if not os.path.exists('results.json'):
-              body = '### ❌ 评测执行失败\n未能生成有效评测结果，请检查代码目录结构或编译错误。'
+          if clone_failed == 'true':
+              body = f"### ❌ 代码仓库克隆失败\n无法拉取代码仓库：`{student_url}`。\n\n**可能原因**：\n1. 该仓库不是 **Public（公开）** 仓库（请进入该仓库 Settings -> Change visibility 改为 Public）；\n2. 仓库 URL 拼写有误或已被删除。"
+              stu_id = None
+              stu_name = None
+          elif not os.path.exists('results.json'):
+              body = '### ❌ 评测执行失败\n未能生成有效评测结果，请检查代码编译错误或目录结构。'
               stu_id = None
               stu_name = None
           else:
@@ -187,11 +217,14 @@ jobs:
                   results = json.load(jf)
 
               if not results:
-                  body = '### ⚠️ 未找到有效作业代码\n请确保作业文件命名为 `1_main.c`、`2_xxx.c` 等规范格式。'
+                  body = '### ⚠️ 未找到有效作业代码\n请确保代码文件命名为 `1_main.c`、`2_xxx.c` 等规范格式。'
                   stu_id = None
                   stu_name = None
               else:
                   lines = ['### 📋 作业自动化评测报告\n']
+                  first = results[0]
+                  stu_id = first.get('student_id')
+                  stu_name = first.get('name')
 
                   lines.append('| 题号 | 文件名 | 测试点 | 运行时间 (ms) | 运行内存 (KB) | 最终得分 | 状态 | 提交时间 |')
                   lines.append('|:---:|:---|:---:|:---:|:---:|:---:|:---:|:---:|')
@@ -226,7 +259,7 @@ jobs:
 
                   body = '\n'.join(lines)
 
-          # 1. 保护隐私：标题统一标注为 [作业评测已完成]，不显示任何学号与姓名
+          # 1. 保护隐私：标题统一标注为 [作业评测已完成]
           if issue_num and gh_repo and gh_token:
               try:
                   t_url = f'https://api.github.com/repos/{gh_repo}/issues/{issue_num}'
@@ -235,7 +268,7 @@ jobs:
               except Exception as e:
                   print('Update title error:', e)
 
-          # 2. 每次重测均作为一条全新评论独立回复在楼下，保留每次提交的独立历史记录！
+          # 2. 发表回复
           try:
               post_url = f'https://api.github.com/repos/{gh_repo}/issues/{issue_num}/comments'
               post_data = json.dumps({'body': body}).encode('utf-8')
@@ -244,7 +277,7 @@ jobs:
           except Exception as e:
               print('Post comment error:', e)
 
-          # 3. 为用户刚才的评论点亮 rocket 🚀 表情（表明评测已成功结束）
+          # 3. 为用户刚才的评论点亮 rocket 🚀 表情
           if comment_id and gh_repo and gh_token:
               try:
                   rk_url = f'https://api.github.com/repos/{gh_repo}/issues/comments/{comment_id}/reactions'
@@ -255,7 +288,7 @@ jobs:
           PYEOF
 
       - name: 5. 成绩加密归档至私有数据库 (homowork-scores)
-        if: steps.parse.outputs.valid == 'true'
+        if: steps.parse.outputs.valid == 'true' && env.CLONE_FAILED != 'true'
         run: |
           cd backend
           git config user.name "github-actions[bot]"
