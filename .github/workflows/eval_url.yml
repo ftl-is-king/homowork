@@ -223,9 +223,29 @@ jobs:
                           t = r.get('time_ms', 0)
                           m = r.get('memory_kb', 0)
                           sc = r.get('score', 0)
-                          status = '✅ 通过' if sc >= 60 else '⚠️ 部分通过'
-                          if sc < 60:
+
+                          # 严格根据测试点通过数判断：全对才是通过，错任何一个都是部分通过或未通过！
+                          is_all_correct = r.get('all_correct', False)
+                          passed_pts = r.get('right_count', 0)
+                          total_pts = r.get('total_count', 0)
+                          if '/' in str(right):
+                              try:
+                                  parts = str(right).split('/')
+                                  passed_pts = int(parts[0])
+                                  total_pts = int(parts[1])
+                                  is_all_correct = (passed_pts == total_pts and total_pts > 0)
+                              except Exception:
+                                  pass
+
+                          if is_all_correct:
+                              status = '✅ 通过'
+                          elif passed_pts > 0:
+                              status = '⚠️ 部分通过'
                               all_passed = False
+                          else:
+                              status = '❌ 未通过'
+                              all_passed = False
+
                           lines.append(f'| 第 {prob} 题 | `{fname}` | {right} | {t} | {m} | **{sc}** | {status} | {t_str} |')
                       else:
                           all_passed = False
@@ -234,9 +254,9 @@ jobs:
 
                   lines.append('\n---\n')
                   if all_passed:
-                      lines.append('> 🎉 **恭喜！提交的代码通过了所有评测标准，成绩已安全登记入库！**')
+                      lines.append('> 🎉 **恭喜！所有题目均已通过全部测试点！成绩已安全登记入库。**')
                   else:
-                      lines.append('> 💡 **提示**：可直接在下方回复任何消息（如“申请重测”），系统将立刻在楼下回复最新评测成绩。')
+                      lines.append('> ⚠️ **提示**：部分题目未完全通过（见上方状态），修改代码后可直接在下方回复（如“申请重测”）重新评测。')
 
                   if run_id:
                       lines.append(f'\n> ⏱️ **评测耗时**: 约 2~3 秒 | [查看 Actions 实时运行状况](https://github.com/{gh_repo}/actions/runs/{run_id})')
