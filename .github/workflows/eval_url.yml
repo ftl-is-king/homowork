@@ -156,11 +156,14 @@ jobs:
       - name: 3. 执行 GCC 编译测试与性能打分 (核心评测运行状况)
         if: steps.parse.outputs.valid == 'true' && env.CLONE_FAILED != 'true'
         id: evaluate
+        env:
+          STUDENT_URL: ${{ steps.parse.outputs.repo_url }}
         run: |
           python3 ./backend/test.py \
             --dir ./student_code \
             --db ./backend/DB.csv \
             --csv ./backend/test.csv \
+            --repo-url "${STUDENT_URL}" \
             --no-push \
             --json-output results.json
 
